@@ -27,9 +27,10 @@ For `main` branch
 
 ```python
 # Import model's torch nn.module
-from models.octa import OctaScribbleNet
+from architectures.models.octa import OctaScribbleNet
 # Import losses
-from losses import WeightedPartialCE, DiceLoss, InterlayerDivergence
+from architectures.segmentor.losses import WeightedPartialCE, DiceLoss, InterlayerDivergence
+from architectures.discriminator.losses import LSDiscriminatorialLoss, LSGeneratorLoss
 
 # Use as you see fit (PyTorch training loop, PyTorch Lightning's LightningModule, Pytorch Ignite, etc.)
 ...
