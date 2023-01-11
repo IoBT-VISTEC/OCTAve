@@ -3,52 +3,58 @@
 [![DOI](https://img.shields.io/badge/DOI-10.1109%2FTBME.2022.3232102-blue)](https://doi.org/10.1109/TBME.2022.3232102)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-![ARCHFIG](docs/figure-1.jpg)
+This is an `experimentation` branch -- an experimentation setting and implementation that we used to produce the result in the manuscript.
 
+## Project Structure
 
-This repository contains the implementation used in the experiment for replication study (`experimentation` branch) and ease-of-use implementation (`main` branch).
+- `architectures`:
+This directory contains PyTorch model (`nn.module`) implementation of models used in this work.
 
-For an additional information about our work, please visit [the project homepage]().
+- `evaluation`:
+This directory contains metrics calculation function and helper class that is used for calculating various performance metrics.
+
+- `experiments`:
+This directory contains PyTorch Lightning's `LightningModule` implementation that dictate model training and experiments.
+
+- `interfaces`:
+This directory contains utility functions and classes that allowing the `experiments` module interact with datasets.
+
+- `runsets`:
+This directory dictates how we run the experiments like a parameter configuration 
+and etc.
+
+- `utils`:
+This directory contains utility functions such as oveeriden SLURMExecutor class that was modified to be compatible with our cluster `sbatch` policy and etc.
 
 ---
-
-
-## Installation
-> Usage of virtual python environment such as `conda` or `virtualenv` is highly recommended.
-
-`pip install -r requirements.txt`
-
 ## Usage
 
-For `main` branch
+### Prepare dataset
 
-- Download resnest50 pretrained weight from this [github release](https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest50-528c19ca.pth).
+- create a directory `data`
 
+#### ROSE
 
-```python
-# Import model's torch nn.module
-from architectures.models.octa import OctaScribbleNet
-# Import losses
-from architectures.segmentor.losses import WeightedPartialCE, DiceLoss, InterlayerDivergence
-from architectures.discriminator.losses import LSDiscriminatorialLoss, LSGeneratorLoss
+- The dataset can be directly extract from zipfile and ready for use.
 
-# Use as you see fit (PyTorch training loop, PyTorch Lightning's LightningModule, Pytorch Ignite, etc.)
-...
+#### OCTA-500
+
+- Extract OCTA-500's zipfile into `data` directory.
+- For any `train_xxxx.py` script, you can execute `python train_xxxx.py run-octa500 --prepare-data --seed [SEED]`. This should only be done once.
+
+### Training
+
+Example of the training command can be found in `train_xxxx.sh`, but our experiment used these script for the sake of convenience.
+
+```bash
+# OCTAve(ResNeStUNet)
+./train_octanetaag.sh
+# OCTAve(UNet)
+./train_scribble.sh
 ```
-
-For `experimentation` branch
-
-> Special Requirement: As our experiment is resource intensive and the high-performance cluster were used, SLURM job submitter package `submitit` is required in our implementation. If your machine does not have job scheduler like SLURM available, a modification to the train script to use `LocalExecutor` is mandatory (We will update the codebase to make this process automatic at the later date). Please refer to their [repo](https://github.com/facebookincubator/submitit). We will try to response to any inquiries as soon as possible.
-
-- Download resnest50 pretrained weight from this [github release](https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest50-528c19ca.pth).
-
-- Download [ROSE](https://imed.nimte.ac.cn/dataofrose.html) and [OCTA-500](https://ieee-dataport.org/open-access/octa-500) datasets. Both datasets required an email request to the dataset owner for an access.
-- Prepare datasets.
-- Train the model.
-
 ---
-## Citation
 
+## Citation
 ```bibtex
 @ARTICLE{9999313,
     author={Chinkamol, Amrest and Kanjaras, Vetit and Sawangjai, Phattarapong and Zhao, Yitian and Sudhawiyangkul, Thapanun and Chantrapornchai, Chantana and Guan, Cuntai and Wilaiprasitporn, Theerawit},

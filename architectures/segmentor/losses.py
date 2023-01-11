@@ -1,3 +1,4 @@
+from turtle import forward
 from typing import Literal, Optional, Sequence
 
 from einops import rearrange, reduce
@@ -24,7 +25,7 @@ class WeightedPartialCE(nn.Module):
         self.manual = manual
  
     def forward(self, y_hat: Tensor, ys: Tensor, ignore_bg: bool = False, reduction: Literal['mean', 'sum'] = 'mean', **kwargs) -> Tensor:
-        assert y_hat.shape[1] == ys.shape[1], 'Number of class mismatch.'
+        assert y_hat.shape[1] == ys.shape[1], 'Number of class is mismatch.'
         # Masking
         if ignore_bg:
             ys[:, 0] = 0
@@ -83,7 +84,7 @@ class ImageMseLoss(nn.Module):
         try:
             return self.loss(y_h.flatten(), y.flatten().float())
         except Exception as e:
-            logger.error(f'Error shape y_h: {y_h.shape}, y: {y.shape}')
+            logger.error(f'Error why got shape y_h: {y_h.shape}, y: {y.shape}')
             raise e
 
 

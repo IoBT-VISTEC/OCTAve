@@ -509,3 +509,11 @@ class build_resnet(nn.Module):
         x = self.layer4(x)
 
         return x
+
+
+def resnet34(pretrained=True, **kwargs):
+    model = build_resnet(BasicBlock, [3, 4, 6, 3])
+    model_path = kwargs.get('model_path', './models/resnet34-333f7ec4.pth')
+    if pretrained:
+        model.load_state_dict(torch.load(model_path), strict=False)
+    return model

@@ -1,12 +1,297 @@
-from typing import Literal, Optional, Sequence, Tuple
+from turtle import forward
+from typing import List, Literal, Optional, Sequence, Tuple
 
-from einops import reduce
+from einops import reduce, rearrange
 import numpy as np 
 import torch
 from torch import nn
+from torch._C import Size
 from torch.functional import Tensor
-from torch.nn import Conv2d, Softmax
+from torch.nn import BatchNorm2d, Conv2d, ConvTranspose2d, ReLU, Softmax, Sigmoid
 from torch.nn import functional as F
+from torch.nn.init import kaiming_normal_
+from torch.nn.modules.pooling import MaxPool2d
+from torchvision.transforms import Resize
+from torchvision.transforms.functional import InterpolationMode
+
+
+class VanilaSegmentor(nn.Module):
+
+    def __init__(
+        self, input_shape: Size, num_classes: int, num_filters: int, enable_batchnorm: bool,
+        upsampling_mode: Literal['deconv', 'nn'] = 'deconv', num_attention_classes: Optional[int] = None,
+        enable_attention_gates: bool = True,
+        ):
+        """Vanila Segmentor.
+        Original implementation by Gabriele Valvano.
+
+        Vanila U-Net with Adversarial Attention Gate module.
+
+        params:
+        input_shape: torch.Size         input size sample.
+        num_classes: int                Number of classes. For binary task, 1 for grayscale prediction, 2 for one-hot.
+        enable_batchnorm: bool          Enabling batchnorm.
+        upsampling_mode: str            Upsample method. 'deconv' for deconvolution. 'nn' for nearest neighbor interpolation.
+        num_attention_classes: str      Number of classes for attention gating. Default is equal to num_classes.
+        """
+        super().__init__()
+        self.input_shape = input_shape
+        assert input_shape[2] == input_shape[3], 'Only support square input.'
+        in_channels = int(input_shape[1])
+        self.num_classes = num_classes
+        if num_attention_classes is None:
+            self.attention_classes = num_classes
+        else:
+            self.attention_classes = num_attention_classes
+        self.num_filters = num_filters
+        self.enable_bn = enable_batchnorm
+        self.upsampling_mode = upsampling_mode
+        self.enable_att = enable_attention_gates
+
+        # Encoder stack
+        self.pool_0, self.enc_0 = self._encoder_block(
+            in_channels, num_filters, enable_batchnorm)
+        self.pool_1, self.enc_1 = self._encoder_block(
+            num_filters, 2 * num_filters, enable_batchnorm)
+        self.pool_2, self.enc_2 = self._encoder_block(
+            2 * num_filters, 4 * num_filters, enable_batchnorm)
+        self.pool_3, self.enc_3 = self._encoder_block(
+            4 * num_filters, 8 * num_filters, enable_batchnorm)
+
+        # Bottleneck
+        self.bottleneck = self._bottleneck_block(
+            num_filters * 8, enable_batchnorm)
+
+        # Decoder
+        self.up_3, self.dec_3, self.att_3 = self._decoder_block(
+            input_shape, num_filters * 8, num_filters * 8, upsampling_mode, num_filters * 8, self.attention_classes, enable_batchnorm)
+        self.up_2, self.dec_2, self.att_2 = self._decoder_block(
+            input_shape, num_filters * 8, num_filters * 4, upsampling_mode, num_filters * 4, self.attention_classes, enable_batchnorm)
+        self.up_1, self.dec_1, self.att_1 = self._decoder_block(
+            input_shape, num_filters * 4, num_filters * 2, upsampling_mode, num_filters * 2, self.attention_classes, enable_batchnorm)
+        self.up_0, self.dec_0, self.att_0 = self._decoder_block(
+            input_shape, num_filters * 2, num_filters, upsampling_mode, num_filters, self.attention_classes, enable_batchnorm)
+
+        # FC
+        self.fc = Conv2d(num_filters, num_classes, kernel_size=1, stride=1)
+        kaiming_normal_(self.fc.weight, nonlinearity='relu')
+
+    @staticmethod
+    def _encoder_block(
+        in_channels: int, num_filters: int, enable_batchnorm: bool):
+        module = []
+        conv_0 = Conv2d(
+            in_channels=in_channels,
+            out_channels=num_filters,
+            kernel_size=(3, 3),
+            stride=1,
+            padding=1
+            )
+        kaiming_normal_(conv_0.weight, nonlinearity='relu')
+        module.append(conv_0)
+        if enable_batchnorm:
+            bn_0 = BatchNorm2d(num_features=num_filters)
+            module.append(bn_0)
+        module.append(ReLU(inplace=True))
+        conv_1 = Conv2d(
+            in_channels=num_filters, out_channels=num_filters,
+            kernel_size=(3, 3),
+            stride=1,
+            padding=1 
+        )
+        kaiming_normal_(conv_1.weight, nonlinearity='relu')
+        module.append(conv_1)
+        if enable_batchnorm:
+            bn_1 = BatchNorm2d(num_features=num_filters)
+            module.append(bn_1)
+        module.append(ReLU(inplace=True))
+        # Calculate padding (stride = 2, filter 2 x 2, dilation=1)
+        # pad = ZeroPad2d(get_same_padding_conv(input_size, 2, 2))
+        pooling = MaxPool2d(
+            kernel_size=(2,2),
+            stride=2,
+            )
+        # pooling = nn.Sequential(pad, pooling)
+        encoder_stack = nn.Sequential(*module)
+        return pooling, encoder_stack
+
+    @staticmethod
+    def _bottleneck_block(num_filters, enable_batchnorm):
+        module = []
+        conv_0 = Conv2d(
+            num_filters,
+            num_filters,
+            kernel_size=1,
+            stride=1
+        )
+        kaiming_normal_(conv_0.weight, nonlinearity='relu')
+        if enable_batchnorm:
+            bn_0 = BatchNorm2d(num_filters)
+            module.append(bn_0)
+        module.append(ReLU(inplace=True))
+        conv_1 = Conv2d(
+            num_filters,
+            num_filters,
+            kernel_size=1,
+            stride=1,
+            )
+        kaiming_normal_(conv_1.weight, nonlinearity='relu')
+        module.append(conv_1)
+        if enable_batchnorm:
+            bn_1 = BatchNorm2d(num_filters)
+            module.append(bn_1)
+        module.append(ReLU(inplace=True))
+        bottleneck_stack = nn.Sequential(*module)
+        return bottleneck_stack
+
+    @staticmethod
+    def _decoder_block(
+        input_shape: Size,
+        prev_layers_in: int,
+        skip_layer_in: int,
+        upsampling_mode: Literal['deconv', 'nn'],
+        num_filters: int,
+        num_classes: int,
+        enable_batchnorm: bool):
+        """Upsampling by Nearest-Neighbor Interpolation.
+        """
+        modules = []
+        input_size = int(input_shape[3])
+        in_channels = int(input_shape[1])
+        new_shape = int(2.0 * input_size)
+        # Deconvolution input channels
+        if upsampling_mode == 'deconv':
+            upsampler = ConvTranspose2d(
+                in_channels=prev_layers_in,
+                out_channels=num_filters,
+                kernel_size=2,
+                stride=2,
+                )
+            kaiming_normal_(upsampler.weight, nonlinearity='relu')
+        elif upsampling_mode == 'nn':
+            scale_up = Resize(
+                size=(new_shape, new_shape),
+                interpolation=InterpolationMode.NEAREST
+            )
+            conv = Conv2d(
+                in_channels=in_channels,
+                out_channels=num_filters,
+                kernel_size=3,
+                stride=1,
+                padding=1
+            )
+            kaiming_normal_(conv.weight, nonlinearity='relu')
+            upsampler = nn.Sequential(scale_up, conv) 
+        else:
+            NotImplementedError(f'Mode {upsampling_mode} not supported.')
+
+        concat_layers = num_filters + skip_layer_in
+        conv_1 = Conv2d(
+            in_channels=concat_layers,
+            out_channels=num_filters,
+            kernel_size=3,
+            stride=1,
+            padding=1
+            )
+        kaiming_normal_(conv_1.weight, nonlinearity='relu')
+        modules.append(conv_1)
+        if enable_batchnorm:
+            bn_1 = BatchNorm2d(num_filters)
+            modules.append(bn_1)
+        modules.append(ReLU(inplace=True))
+
+        conv_2 = Conv2d(
+            in_channels=num_filters,
+            out_channels=num_filters,
+            kernel_size=3,
+            stride=1,
+            padding=1
+        )
+        kaiming_normal_(conv_2.weight, nonlinearity='relu')
+        modules.append(conv_2)
+        if enable_batchnorm:
+            bn_2 = BatchNorm2d(num_features=num_filters)
+            modules.append(bn_2)
+        modules.append(ReLU(inplace=True))
+
+        # Self-Attention
+        attention_gate = AdversarialAttentionGate(num_filters, num_classes)
+
+        return upsampler, nn.Sequential(*modules), attention_gate
+
+    def forward(self, x: Tensor) -> Tuple[Optional[Tuple[Tensor, Tensor, Tensor, Tensor]], Tensor]:
+        # Forwarding
+        # Encoder Stack
+        x_0 = self.enc_0(x)         # - - > Skip
+        x_0_p = self.pool_0(x_0)    # v     Below
+
+        x_1 = self.enc_1(x_0_p)     # - - > Skip
+        x_1_p = self.pool_1(x_1)    # v     Below
+
+        x_2 = self.enc_2(x_1_p)     # - - > Skip
+        x_2_p = self.pool_2(x_2)    # v     Below
+
+        x_3 = self.enc_3(x_2_p)     # - - > Skip
+        x_3_p = self.pool_3(x_3)    # v     Below
+
+        # Bottleneck, no pooling.
+        x_b = self.bottleneck(x_3_p)
+        # Decoder Stack
+        d_3 = self.up_3(x_b)
+        d_3 = torch.cat((x_3, d_3), dim=1)
+        d_3 = self.dec_3(d_3)
+        if self.enable_att:
+            d_3, y_3 = self.att_3(d_3)
+
+        d_2 = self.up_2(d_3)
+        d_2 = torch.cat((x_2, d_2), dim=1) # 6 num_filters
+        d_2 = self.dec_2(d_2)
+        if self.enable_att:
+            d_2, y_2 = self.att_2(d_2)
+
+        d_1 = self.up_1(d_2)
+        d_1 = torch.cat((x_1, d_1), dim=1)
+        d_1 = self.dec_1(d_1)
+        if self.enable_att:
+            d_1, y_1 = self.att_1(d_1)
+
+        d_0 = self.up_0(d_1)
+        d_0 = torch.cat((x_0, d_0), dim=1)
+        d_0 = self.dec_0(d_0)
+        if self.enable_att:
+            d_0, y_0 = self.att_0(d_0)
+
+        agg_map = self.fc(d_0)
+
+        if self.enable_att:
+            return (y_0, y_1, y_2, y_3), agg_map
+        else:
+            return None, agg_map
+
+    def forward_viz(self, x: Tensor):
+        _, agg_map = self.forward(x)
+        return agg_map
+
+    def predict(self, x: Tensor, method: Literal['softmax', 'one-hot', 'origin', 'sigmoid'] = 'softmax'):
+        """Segmentation on input x.
+        params:
+        x: Tensor       Raw image input tensor.
+        method: str     Prediction output mode. ['softmax', 'one-hot', 'origin'].
+                        Beware that 'one-hot' method is not differentiable.
+
+        """
+        att, agg_map = self.forward(x)
+        if method == 'softmax':
+            prediction = Softmax(dim=1)(agg_map)
+        elif method == 'sigmoid':
+            prediction = Sigmoid()(agg_map)
+        elif method == 'one-hot':
+            prediction = rearrange(F.one_hot(torch.argmax(agg_map, dim=1)), 'b h w c -> b c h w')
+        elif method == 'origin':
+            prediction = agg_map
+        else:
+            raise NotImplementedError
+        return att, prediction
 
 
 class AdversarialAttentionGate(nn.Module):

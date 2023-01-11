@@ -1,12 +1,42 @@
-from typing import Literal, Tuple
+from typing import Literal, Optional, Sequence, Tuple
 
 import torch
+from architectures.extra import resnest
 from architectures.extra.resnest import ResNestDecoder, Upsampling, resnest50
 from architectures.segmentor.blocks import AdversarialAttentionGate, GlobalAveragePooling2D
 from einops import rearrange
+from einops.layers.torch import Rearrange
 from torch import nn
+from torch._C import Size
 from torch.functional import Tensor
 from torch.nn import functional as F
+
+from utils.tools import upscale_tensors_like_2d
+
+
+class Segmentor(nn.Module):
+
+    Backbone = ['original', 'resnest50']
+
+    def __init__(
+        self,
+        num_classes: int, backbone: str, use_pretrained_backbone: bool, backbone_weight: str,
+        input_shape: Optional[Size] = None):
+        """Segmentor wrapper class
+        """
+        super().__init__()
+
+        if backbone == 'resnest50':
+            self.unet = ResnestUNet(num_classes=num_classes, pretrain=use_pretrained_backbone, weight_path=backbone_weight)
+        elif backbone == 'original':
+            if input_shape is None:
+                raise Exception('Original implementation required sample input shape')
+
+        else:
+            raise NotImplementedError
+
+        def forward(self, x):
+            return self.unet.forward(x)
 
 
 class ResnestUNet(nn.Module):

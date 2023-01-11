@@ -9,6 +9,7 @@ from architectures.segmentor.losses import WeightedPartialCE, DiceLoss
 from torch import nn
 from torch._C import Size
 from torch.functional import Tensor
+from torchvision.transforms import functional as FT
 
 
 class OctaScribbleNet(nn.Module):
