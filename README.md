@@ -36,7 +36,7 @@ from architectures.discriminator.losses import LSDiscriminatorialLoss, LSGenerat
 ...
 ```
 
-For `experimentation` branch
+For `experiment` branch
 
 > Special Requirement: As our experiment is resource intensive and the high-performance cluster were used, SLURM job submitter package `submitit` is required in our implementation. If your machine does not have job scheduler like SLURM available, a modification to the train script to use `LocalExecutor` is mandatory (We will update the codebase to make this process automatic at the later date). Please refer to their [repo](https://github.com/facebookincubator/submitit). We will try to response to any inquiries as soon as possible.
 
