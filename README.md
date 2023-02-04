@@ -8,7 +8,7 @@
 
 This repository contains the implementation used in the experiment for replication study (`experimentation` branch) and ease-of-use implementation (`main` branch).
 
-For an additional information about our work, please visit [the project homepage]().
+For an additional information about our work, please visit [the project homepage](iobt-vistec.github.io/OCTAve).
 
 ---
 
